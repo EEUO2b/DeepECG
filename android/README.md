@@ -26,15 +26,23 @@ atriale**, **Autre**, **Bruité**.
 ## Principe
 
 1. **Photo** de l'impression ECG (appareil photo ou galerie).
-2. **Numérisation** (`EcgDigitizer`) : seuillage du tracé sombre, position du
-   tracé colonne par colonne, calibration temps/amplitude grâce à la grille
-   rose (25 mm/s, 300 Hz, 10 mm/mV), conversion en mV. Si la grille n'est pas
-   détectée, la largeur de la photo est supposée représenter 30 s et
-   l'amplitude est estimée (indiqué dans l'interface).
-3. **Classification** (`EcgClassifier`) : le signal est rééchantillonné sur la
-   longueur d'entrée du modèle (9000 points pour `CNN_ECG.py`, 10100 pour
-   `Conv1D_ECG.py` avec normalisation z-score) puis passé au modèle TFLite
-   embarqué, qui renvoie les 4 probabilités.
+2. **Numérisation** (`EcgDigitizer`) : seuillage du tracé sombre, puis détection
+   robuste des bandes — cadrage sur la zone de contenu (marges/texte exclus),
+   profil de lignes lissé seuillé à 40 % de la médiane des lignes non nulles,
+   filtrage par couverture horizontale ≥ 40 % (écarte le texte), expansion des
+   noyaux jusqu'aux milieux entre noyaux voisins. Classement : ≥ 10 bandes →
+   format 12×1 ; 3 à 9 bandes → format 3×4 (une éventuelle bande de rythme en
+   bas, plus courte, est exclue) ; 1 à 2 bandes → repli : découpe en 3 bandes.
+   Le format et le nombre de bandes détectés sont affichés dans l'interface.
+   Ensuite, position du tracé colonne par colonne (médiane par colonne),
+   calibration temps/amplitude grâce à la grille rose (25 mm/s, 300 Hz,
+   10 mm/mV), conversion en mV. En 3×4 chaque dérivation fait 2,5 s et est
+   répétée (tiling) jusqu'aux 10 s du modèle. Si la grille n'est pas détectée,
+   des valeurs par défaut sont utilisées et indiquées dans l'interface.
+3. **Classification** (`EcgClassifier`) : chaque dérivation est ramenée à la
+   longueur/fréquence d'entrée du modèle (9000 points @ 300 Hz pour le modèle
+   1 dérivation, 1000 points × 12 @ 100 Hz pour PTB-XL ; z-score global si
+   `normalize=true`), puis passée au modèle TFLite embarqué.
 
 ## Prérequis
 
