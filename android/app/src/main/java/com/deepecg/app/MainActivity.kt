@@ -174,8 +174,7 @@ class MainActivity : AppCompatActivity() {
                 m.qtcMs?.let { "%.0f".format(it) } ?: getString(R.string.not_available)
             )
         ).append("  ").append(getString(R.string.intervals_ref)).append("\n")
-        if (m.axisDeg != null) {
-            val ax = m.axisDeg
+        m.axisDeg?.let { ax ->
             val label = when {
                 ax in -30.0..90.0 -> getString(R.string.axis_normal)
                 ax in -90.0 until -30.0 -> getString(R.string.axis_left)
