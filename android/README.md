@@ -1,8 +1,21 @@
 # DeepECG — application Android
 
+[![Android build](https://github.com/EEUO2b/DeepECG/actions/workflows/android.yml/badge.svg)](https://github.com/EEUO2b/DeepECG/actions/workflows/android.yml)
+
 Application de démonstration qui photographie une impression ECG sur papier
 millimétré, en extrait le tracé, puis le classe avec un modèle DeepECG exporté
 en TensorFlow Lite.
+
+## CI (GitHub Actions)
+
+Le workflow [.github/workflows/android.yml](../.github/workflows/android.yml)
+se déclenche sur chaque push/PR et :
+1. **build-apk** : compile l'APK debug (`./gradlew :app:assembleDebug`, JDK 17,
+   SDK 34) et publie l'artefact `app-debug` ;
+2. **export-model-and-build** : valide `export_tflite.py --pretrained ptbxl`
+   (et `--pretrained andreotti`), puis construit un APK contenant le modèle
+   PTB-XL embarqué (artefact `app-debug-with-ptbxl-model`), prêt à être testé
+   sur un appareil.
 
 Classes prédites (PhysioNet/CinC Challenge 2017) : **Normal**, **Fibrillation
 atriale**, **Autre**, **Bruité**.
