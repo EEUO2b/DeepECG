@@ -16,8 +16,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
-
+      # ubuntu-latest runners ship a preinstalled Android SDK (ANDROID_HOME)
       - name: Accept SDK licenses and install platform
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
@@ -62,8 +61,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-
-      - uses: android-actions/setup-android@v3
 
       - name: Accept SDK licenses and install platform
         run: |
