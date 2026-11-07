@@ -203,7 +203,7 @@ object EcgDigitizer {
         if (start >= 0) raw.add(start until h)
         val merged = ArrayList<IntRange>()
         for (b in raw) {
-            if (merged.isNotEmpty() && b.first - merged.last.last <= 6) {
+            if (merged.isNotEmpty() && b.first - merged.last().last <= 6) {
                 val prev = merged.removeAt(merged.size - 1)
                 merged.add(prev.first until b.last)
             } else {
@@ -310,7 +310,7 @@ object EcgDigitizer {
             val p95 = sorted[(sorted.size * 0.95).toInt().coerceIn(0, sorted.size - 1)]
             2.0 / max(1.0, p95 - p5)
         }
-        return FloatArray(y.size) { (y0 - y[it]) * scale }
+        return FloatArray(y.size) { ((y0 - y[it]) * scale).toFloat() }
     }
 
     private fun gridSpacingX(m: Masks): Double? {
