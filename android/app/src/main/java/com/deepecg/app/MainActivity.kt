@@ -176,9 +176,9 @@ class MainActivity : AppCompatActivity() {
         ).append("  ").append(getString(R.string.intervals_ref)).append("\n")
         m.axisDeg?.let { ax ->
             val label = when {
-                ax in -30.0..90.0 -> getString(R.string.axis_normal)
-                ax in -90.0 until -30.0 -> getString(R.string.axis_left)
-                ax in 90.0..180.0 -> getString(R.string.axis_right)
+                ax >= -30.0 && ax <= 90.0 -> getString(R.string.axis_normal)
+                ax >= -90.0 && ax < -30.0 -> getString(R.string.axis_left)
+                ax > 90.0 && ax <= 180.0 -> getString(R.string.axis_right)
                 else -> getString(R.string.axis_extreme)
             }
             sb.append(getString(R.string.axis, getString(R.string.axis_value, ax, label))).append("\n")
