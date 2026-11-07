@@ -21,15 +21,17 @@ data class DigitizedEcg(
 
 /**
  * Transforme la photo d'un tracé ECG imprimé sur papier millimétré en signal
- * numérique, sans dépendance externe (pas d'OpenCV) :
- *  1. conversion en niveaux de gris et seuillage pour isoler le tracé sombre ;
- *  2. détection des bandes horizontales (1 bande = mono-dérivation pleine
- *     largeur, 3 bandes = format 3×4, 12 bandes = format 12×1) ;
- *  3. pour chaque cellule, position verticale du tracé colonne par colonne,
- *     médiane glissante et interpolation des trous ;
- *  4. détection de la grille rose pour calibrer le temps (25 mm/s, 300 Hz)
- *     et l'amplitude (10 mm/mV) ;
- *  5. conversion en mV.
+ * numérique, sans dépendance externe (pas d'OpenCV).
+ *
+ * Détection des bandes (améliorée) :
+ *  1. cadrage sur la zone de contenu (les marges avec texte sont exclues) ;
+ *  2. profil de lignes (nb de pixels sombres par ligne), lissé, seuillé à
+ *     max(3, 0.4 × médiane des lignes non nulles) pour trouver les noyaux ;
+ *  3. filtrage par couverture horizontale (≥ 40 % de la largeur) pour écarter
+ *     le texte ;
+ *  4. expansion de chaque noyau jusqu'au milieu entre noyaux voisins ;
+ *  5. classement : ≥ 10 bandes → format 12×1, 3..9 → format 3×4 (la bande de
+ *     rythme en bas, plus courte, est exclue), 1..2 → découpe en 3 bandes.
  */
 object EcgDigitizer {
 
@@ -47,6 +49,10 @@ object EcgDigitizer {
         val dark: BooleanArray,
         val grid: BooleanArray
     )
+
+    private class Content(val x0: Int, val x1: Int, val y0: Int, val y1: Int)
+
+    private class Band(val first: Int, val last: Int, val count: Int)
 
     /** Mono-dérivation : toute l'image est une seule trace (30 s supposées si pas de grille). */
     fun digitize(src: Bitmap): DigitizedEcg {
@@ -76,36 +82,58 @@ object EcgDigitizer {
     /** 12 dérivations : détecte le format 3×4 (3 bandes × 4 colonnes de 2,5 s) ou 12×1. */
     fun digitize12(src: Bitmap): DigitizedEcg {
         val m = buildMasks(src)
-        val bands = rowBands(m)
+        val c = contentBox(m)
+        val bands = detectBands(m, c)
         val pxX = gridSpacingX(m)
         val pxY = gridSpacingY(m)
         val mVperPx = if (pxY != null && pxY > 0) MV_PER_MM / pxY else null
+        val cw = c.x1 - c.x0
+        val ch = c.y1 - c.y0
 
         val leads = ArrayList<FloatArray>(12)
         val note: String
         val cellSec: Double
         val refWidth: Int
-        if (bands.size in 10..14) {
+        if (bands.size >= 10) {
+            // format 12×1 : chaque bande = une dérivation sur toute la largeur (10 s)
+            val top = bands.sortedByDescending { it.count }.take(12).sortedBy { it.first }
             cellSec = 10.0
-            refWidth = m.w
-            for (b in bands.take(12)) {
-                leads.add(toMv(extractColumnTrace(m, 0, m.w, b.first, b.last), mVperPx))
+            refWidth = cw
+            for (b in top) {
+                leads.add(toMv(extractColumnTrace(m, c.x0, c.x1, c.y0 + b.first, c.y0 + b.last), mVperPx))
             }
-            note = "format 12×1 détecté (${leads.size} dérivations, pleine largeur)"
-        } else if (bands.size in 2..4) {
+            note = "format 12×1 (${top.size}/${bands.size} bandes)"
+        } else {
+            // format 3×4 : 3 bandes × 4 colonnes de 2,5 s
             cellSec = 2.5
-            val rows = bands.take(3)
-            val cols = columnCells(m, rows)
-            refWidth = cols[1] - cols[0]
+            refWidth = cw / 4
+            var cand = bands
+            if (cand.size >= 4) {
+                // exclure une éventuelle bande de rythme en bas (plus courte)
+                val heights = cand.dropLast(1).map { it.last - it.first }.sorted()
+                val medH = heights[heights.size / 2]
+                val bottom = cand.last()
+                if (bottom.last - bottom.first < 0.6 * medH) cand = cand.dropLast(1)
+            }
+            val rows: List<Band>
+            if (cand.size >= 3) {
+                rows = cand.sortedByDescending { it.count }.take(3).sortedBy { it.first }
+                note = "format 3×4 (${rows.size}/${bands.size} bandes, 2,5 s/dérivation)"
+            } else {
+                rows = (0..2).map { Band(it * ch / 3, (it + 1) * ch / 3, 0) }
+                note = "format 3×4 estimé (${bands.size} bande(s), découpe en 3)"
+            }
+            val cols = intArrayOf(0, cw / 4, cw / 2, 3 * cw / 4, cw)
             for (col in 0..3) {
-                for (row in rows.indices) {
-                    val b = rows[row]
-                    leads.add(toMv(extractColumnTrace(m, cols[col], cols[col + 1], b.first, b.last), mVperPx))
+                for (row in rows) {
+                    leads.add(
+                        toMv(
+                            extractColumnTrace(m, c.x0 + cols[col], c.x0 + cols[col + 1], c.y0 + row.first, c.y0 + row.last),
+                            mVperPx
+                        )
+                    )
                 }
             }
-            note = "format 3×4 détecté (2,5 s par dérivation, ordre colonne-major)"
-        } else {
-            throw IllegalArgumentException("Format 12 dérivations non reconnu (${bands.size} bandes détectées)")
         }
 
         val samplesPerSec = if (pxX != null && pxX > 0) {
@@ -167,98 +195,130 @@ object EcgDigitizer {
         return Masks(w, h, dark, grid)
     }
 
-    /** Bandes horizontales contenant du tracé (après lissage). */
-    private fun rowBands(m: Masks): List<IntRange> {
+    /** Zone de contenu : exclut les marges (texte, bords). */
+    private fun contentBox(m: Masks): Content {
         val w = m.w
         val h = m.h
-        val rowCount = IntArray(h)
+        val colThr = maxOf(2, h / 200)
+        val rowThr = maxOf(2, w / 200)
+        var x0 = -1
+        var x1 = -1
+        var y0 = -1
+        var y1 = -1
+        for (x in 0 until w) {
+            var c = 0
+            for (y in 0 until h) if (m.dark[y * w + x]) c++
+            if (c >= colThr) {
+                if (x0 < 0) x0 = x
+                x1 = x
+            }
+        }
         for (y in 0 until h) {
             var c = 0
             val base = y * w
             for (x in 0 until w) if (m.dark[base + x]) c++
-            rowCount[y] = c
-        }
-        val sm = IntArray(h)
-        for (y in 0 until h) {
-            var s = 0
-            for (d in -2..2) {
-                val yy = y + d
-                if (yy in 0 until h) s += rowCount[yy]
-            }
-            sm[y] = s
-        }
-        val thr = maxOf(8, w / 100) * 5
-        val raw = ArrayList<IntRange>()
-        var start = -1
-        var y = 0
-        while (y < h) {
-            if (sm[y] >= thr) {
-                if (start < 0) start = y
-            } else if (start >= 0) {
-                raw.add(start until y)
-                start = -1
-            }
-            y++
-        }
-        if (start >= 0) raw.add(start until h)
-        val merged = ArrayList<IntRange>()
-        for (b in raw) {
-            if (merged.isNotEmpty() && b.first - merged.last().last <= 6) {
-                val prev = merged.removeAt(merged.size - 1)
-                merged.add(prev.first until b.last)
-            } else {
-                merged.add(b)
+            if (c >= rowThr) {
+                if (y0 < 0) y0 = y
+                y1 = y
             }
         }
-        return merged.filter { it.last - it.first >= 30 }
+        if (x0 < 0 || y0 < 0) return Content(0, w, 0, h)
+        return Content(x0, x1 + 1, y0, y1 + 1)
     }
 
-    /** Limites des 4 colonnes d'un format 3×4 (lignes verticales de la grille, sinon découpe égale). */
-    private fun columnCells(m: Masks, rows: List<IntRange>): IntArray {
+    /** Bandes horizontales de tracé dans la zone de contenu (voir doc de la classe). */
+    private fun detectBands(m: Masks, c: Content): List<Band> {
         val w = m.w
-        val bandHeight = rows.sumOf { it.last - it.first + 1 }
-        val colScore = IntArray(w)
-        for (x in 0 until w) {
-            var c = 0
-            for (b in rows) {
-                for (y in b.first..b.last) {
-                    if (m.grid[y * w + x] || m.dark[y * w + x]) c++
+        val cw = c.x1 - c.x0
+        val ch = c.y1 - c.y0
+        if (cw <= 0 || ch <= 0) return emptyList()
+
+        val rc = DoubleArray(ch)
+        for (yy in 0 until ch) {
+            val base = (c.y0 + yy) * w
+            var s = 0
+            for (xx in 0 until cw) if (m.dark[base + c.x0 + xx]) s++
+            rc[yy] = s.toDouble()
+        }
+        val sm = DoubleArray(ch)
+        for (y in 0 until ch) {
+            var s = 0.0
+            for (d in -1..1) {
+                val yy = y + d
+                if (yy in 0 until ch) s += rc[yy]
+            }
+            sm[y] = s / 3.0
+        }
+        val pos = sm.filter { it > 0.0 }
+        val med = if (pos.isEmpty()) 3.0 else pos.sorted()[pos.size / 2]
+        val tHi = maxOf(3.0, med * 0.4)
+
+        val cores = ArrayList<Pair<Int, Int>>()
+        var inBand = false
+        var start = 0
+        var gap = 0
+        for (y in 0 until ch) {
+            if (sm[y] >= tHi && !inBand) {
+                inBand = true
+                start = y
+                gap = 0
+            } else if (sm[y] < tHi && inBand) {
+                gap++
+                if (gap > 8) {
+                    cores.add(start to (y - gap))
+                    inBand = false
+                    gap = 0
                 }
             }
-            colScore[x] = c
         }
-        val peaks = ArrayList<Int>()
-        var x = 1
-        while (x < w - 1) {
-            if (colScore[x] >= colScore[x - 1] && colScore[x] > colScore[x + 1] && colScore[x] > bandHeight * 2) {
-                peaks.add(x)
+        if (inBand) cores.add(start to ch)
+
+        val filtered = ArrayList<Pair<Int, Int>>()
+        for ((a, b) in cores) {
+            if (b - a < 10) continue
+            var cov = 0
+            for (xx in 0 until cw) {
+                var has = false
+                for (yy in a until b) {
+                    if (m.dark[(c.y0 + yy) * w + c.x0 + xx]) {
+                        has = true
+                        break
+                    }
+                }
+                if (has) cov++
             }
-            x++
+            if (cov >= 0.4 * cw) filtered.add(a to b)
         }
-        val chosen = peaks.sortedByDescending { colScore[it] }.take(3).sorted()
-        return if (chosen.size == 3 && chosen[1] - chosen[0] > w / 8 && chosen[2] - chosen[1] > w / 8) {
-            intArrayOf(0, chosen[0], chosen[1], chosen[2], w)
-        } else {
-            intArrayOf(0, w / 4, w / 2, 3 * w / 4, w)
+        filtered.sortBy { it.first }
+
+        val bands = ArrayList<Band>()
+        for (i in filtered.indices) {
+            val (a, b) = filtered[i]
+            val lo = if (i == 0) 0 else (filtered[i - 1].second + a) / 2
+            val hi = if (i == filtered.size - 1) ch else (b + filtered[i + 1].first) / 2
+            var cnt = 0.0
+            for (yy in lo until hi) cnt += rc[yy]
+            bands.add(Band(lo, hi, cnt.toInt()))
         }
+        return bands
     }
 
-    /** Position verticale du tracé par colonne dans la cellule [x0,x1)×[y0,y1], en pixels. */
+    /** Position verticale (médiane) du tracé par colonne dans la cellule [x0,x1)×[y0,y1), en pixels. */
     private fun extractColumnTrace(m: Masks, x0: Int, x1: Int, y0: Int, y1: Int): DoubleArray {
         val w = m.w
         val n = x1 - x0
         val y = DoubleArray(n) { Double.NaN }
+        val tmp = ArrayList<Int>(y1 - y0 + 1)
         for (xx in 0 until n) {
             val x = x0 + xx
-            var count = 0
-            var sum = 0
+            tmp.clear()
             for (yy in y0..y1) {
-                if (m.dark[yy * w + x]) {
-                    count++
-                    sum += yy
-                }
+                if (m.dark[yy * w + x]) tmp.add(yy)
             }
-            if (count >= 2) y[xx] = sum.toDouble() / count
+            if (tmp.size >= 2) {
+                tmp.sort()
+                y[xx] = tmp[tmp.size / 2].toDouble()
+            }
         }
         val f = DoubleArray(n)
         for (i in 0 until n) {
