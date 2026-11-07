@@ -1,0 +1,4 @@
+__pycache__/
+pretrained/
+android/app/src/main/assets/ecg_model.tflite
+android/app/src/main/assets/model_info.txt

@@ -30,10 +30,30 @@ class EcgClassifier(context: Context) : Closeable {
     private val interpreter: org.tensorflow.lite.Interpreter
     private val inputLength: Int
     private val normalize: Boolean
-    private val labels: List<String> =
-        listOf("Normal", "Fibrillation atriale", "Autre", "Bruité")
+    private val labels: List<String>
 
     init {
+        val info = mutableMapOf<String, String>()
+        try {
+            context.assets.open(INFO_ASSET).bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    val parts = line.split('=', limit = 2)
+                    if (parts.size == 2) info[parts[0].trim()] = parts[1].trim()
+                }
+            }
+        } catch (e: Exception) {
+            // pas de model_info.txt : comportement par défaut CNN_ECG.py (N,A,O,~)
+        }
+        normalize = info["normalize"] == "true"
+        val names = mapOf(
+            "N" to "Normal",
+            "A" to "Fibrillation atriale",
+            "O" to "Autre",
+            "~" to "Bruité"
+        )
+        val codes = info["labels"]?.split(",")?.map { it.trim() } ?: listOf("N", "A", "O", "~")
+        labels = codes.map { names[it] ?: it }
+
         val afd = context.assets.openFd(MODEL_ASSET)
         val inputStream = FileInputStream(afd.fileDescriptor)
         val buffer = inputStream.channel.map(
@@ -44,19 +64,6 @@ class EcgClassifier(context: Context) : Closeable {
 
         val shape = interpreter.getInputTensor(0).shape()
         inputLength = shape.fold(1) { acc, d -> acc * d }
-
-        val info = mutableMapOf<String, String>()
-        try {
-            context.assets.open(INFO_ASSET).bufferedReader().useLines { lines ->
-                lines.forEach { line ->
-                    val parts = line.split('=', limit = 2)
-                    if (parts.size == 2) info[parts[0].trim()] = parts[1].trim()
-                }
-            }
-        } catch (e: Exception) {
-            // pas de model_info.txt : comportement par défaut CNN_ECG.py
-        }
-        normalize = info["normalize"] == "true"
     }
 
     fun classify(ecg: DigitizedEcg): ClassificationResult {

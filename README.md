@@ -28,7 +28,8 @@ python Conv1D_ECG.py
 ## Android app
 An Android demo app lives in [android/](android/). It photographs an ECG printout, digitizes the trace (grid-based time/amplitude calibration) and classifies it (Normal / Atrial fibrillation / Other / Noisy) with a TFLite export of a model trained here:
 ```
-python export_tflite.py --model Keras_models/my_model.h5 --arch cnn
+python export_tflite.py --pretrained andreotti   # ready-made ResNet-34 (CinC 2017, GPL v3), or:
+python export_tflite.py --model Keras_models/my_model.h5 --arch cnn   # your own trained model
 ```
 See [android/README.md](android/README.md) for build and usage instructions. It is a research demo, not a medical device.
 
