@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DeepECG</string>
+    <string name="hint">Photographiez une impression ECG (papier millimétré) bien à plat, sans reflet, en cadrant toute la largeur du tracé.</string>
+    <string name="take_photo">Prendre une photo</string>
+    <string name="pick_gallery">Choisir une image</string>
+    <string name="analyzing">Analyse en cours…</string>
+    <string name="photo_annulee">Photo annulée</string>
+    <string name="model_missing">Modèle absent : entraînez un modèle puis exécutez « python export_tflite.py --model VOTRE_MODELE.h5 » à la racine du dépôt (voir android/README.md).</string>
+    <string name="error_decode">Impossible de lire cette image.</string>
+    <string name="error_analysis">Erreur d’analyse : %1$s</string>
+    <string name="result_label">Résultat : %1$s (%2$.0f %%)</string>
+    <string name="info_format">Durée : %1$.1f s — %2$d échantillons — %3$s</string>
+    <string name="disclaimer">Démo de recherche — ne remplace pas un avis médical. Consultez un médecin pour tout diagnostic.</string>
+</resources>

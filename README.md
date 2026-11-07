@@ -25,6 +25,13 @@ python CNN_ECG.py mit
 python Conv1D_ECG.py
 ```
   
+## Android app
+An Android demo app lives in [android/](android/). It photographs an ECG printout, digitizes the trace (grid-based time/amplitude calibration) and classifies it (Normal / Atrial fibrillation / Other / Noisy) with a TFLite export of a model trained here:
+```
+python export_tflite.py --model Keras_models/my_model.h5 --arch cnn
+```
+See [android/README.md](android/README.md) for build and usage instructions. It is a research demo, not a medical device.
+
 # Additional info
 ### Citation
 If you use my repo - then, please, cite my paper. This is a BibTex citation:
