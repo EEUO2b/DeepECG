@@ -121,33 +121,20 @@ class MainActivity : AppCompatActivity() {
         setLoading(true)
         executor.execute {
             try {
-                val ecg = EcgDigitizer.digitize(bitmap)
+                val multiLead = clf.numLeads > 1
+                val ecg = if (multiLead) EcgDigitizer.digitize12(bitmap) else EcgDigitizer.digitize(bitmap)
                 val result = clf.classify(ecg)
-                val durationSec = ecg.samplesMv.size / ecg.samplesPerSec
+                val leadSamples = ecg.leads.firstOrNull()?.size ?: 0
+                val durationSec = if (ecg.samplesPerSec > 0) leadSamples / ecg.samplesPerSec else 0.0
                 runOnUiThread {
                     setLoading(false)
                     infoText.text = getString(
                         R.string.info_format,
                         durationSec,
-                        ecg.samplesMv.size,
+                        ecg.leads.sumOf { it.size },
                         ecg.note
                     )
-                    val sb = StringBuilder()
-                    sb.append(
-                        getString(
-                            R.string.result_label,
-                            result.label,
-                            result.confidence * 100f
-                        )
-                    )
-                    for (i in result.probabilities.indices) {
-                        sb.append("\n")
-                            .append(result.labels[i])
-                            .append(" : ")
-                            .append("%.0f %%".format(result.probabilities[i] * 100f))
-                    }
-                    sb.append("\n\n").append(getString(R.string.disclaimer))
-                    resultText.text = sb.toString()
+                    resultText.text = buildResultText(result)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -156,6 +143,39 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun buildResultText(result: ClassificationResult): String {
+        val sb = StringBuilder()
+        if (result.multilabel) {
+            sb.append(getString(R.string.multilabel_header))
+            for (i in result.probabilities.indices) {
+                val hit = result.thresholds != null &&
+                    i < result.thresholds.size &&
+                    result.probabilities[i] >= result.thresholds[i]
+                sb.append("\n")
+                    .append(if (hit) "✓ " else "· ")
+                    .append(result.labels[i])
+                    .append(" : ")
+                    .append("%.0f %%".format(result.probabilities[i] * 100f))
+            }
+        } else {
+            sb.append(
+                getString(
+                    R.string.result_label,
+                    result.label,
+                    result.confidence * 100f
+                )
+            )
+            for (i in result.probabilities.indices) {
+                sb.append("\n")
+                    .append(result.labels[i])
+                    .append(" : ")
+                    .append("%.0f %%".format(result.probabilities[i] * 100f))
+            }
+        }
+        sb.append("\n\n").append(getString(R.string.disclaimer))
+        return sb.toString()
     }
 
     private fun decodeRotated(file: File): Bitmap? {

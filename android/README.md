@@ -55,6 +55,29 @@ Vérifié de bout en bout : le TFLite généré prend `[1, 9000, 1]` en entrée 
 retourne `[1, 4]`, et ses prédictions sur des enregistrements réels de
 `training2017.zip` correspondent aux labels de `REFERENCE.csv`.
 
+### 12 dérivations — PTB-XL (recommandé pour une impression 12 dérivations)
+
+```bash
+python export_tflite.py --pretrained ptbxl
+```
+
+Télécharge le CNN 12 dérivations de
+[Steenslid/ecg-ptbxl-classification](https://huggingface.co/Steenslid/ecg-ptbxl-classification)
+(**licence MIT** ; dataset **PTB-XL**, Wagner et al., *Scientific Data* 2020),
+entrée `(1, 1000, 12)` = 10 s @ 100 Hz en mV, **normalisation z-score par
+dérivation directement intégrée au TFLite exporté** (~2,8 Mo), sortie
+multi-label de 5 probabilités (NORM, MI, STTC, CD, HYP) avec seuils de décision.
+
+Vérifié de bout en bout sur de vrais enregistrements PTB-XL (100 Hz) : le
+TFLite prend `[1, 1000, 12]` en mV bruts et retourne `[1, 5]`, identique au
+modèle Keras de référence (écart < 1e-6), avec des prédictions conformes aux
+superclasses annotées (ex. MI+STTC, CD+HYP détectés exactement).
+
+L'application détecte automatiquement le format de l'impression :
+**3×4** (3 lignes × 4 colonnes de 2,5 s, ordre colonne-major
+I/II/III, aVR/aVL/aVF, V1/V2/V3, V4/V5/V6) ou **12×1** (12 lignes pleine
+largeur de 10 s).
+
 ## Entraîner votre propre modèle
 
 Avec ce dépôt (aucun poids n'est fourni) :
@@ -70,13 +93,16 @@ python export_tflite.py --model Keras_models/my_model.h5 --arch cnn
 
    ```bash
    pip install tensorflow
-   python export_tflite.py --pretrained andreotti
+   python export_tflite.py --pretrained ptbxl        # 12 dérivations (PTB-XL, MIT)
+   python export_tflite.py --pretrained andreotti    # 1 dérivation (CinC 2017, GPL v3)
    # ou avec votre propre modèle : --model Keras_models/my_model.h5 --arch cnn
    # (--arch conv1d pour un modèle entraîné avec Conv1D_ECG.py)
    ```
 
    Cela écrit `android/app/src/main/assets/ecg_model.tflite` et
-   `model_info.txt` (forme d'entrée, normalisation, ordre des classes).
+   `model_info.txt` (forme d'entrée, nombre de dérivations, normalisation,
+   classes). Le mode choisi (1 ou 12 dérivations) est détecté automatiquement
+   d'après `model_info.txt`.
 
 2. Ouvrez le dossier `android/` dans Android Studio, laissez Gradle
    synchroniser, puis lancez l'application sur un appareil ou un émulateur

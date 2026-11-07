@@ -11,25 +11,41 @@ import kotlin.math.sqrt
 data class ClassificationResult(
     val labels: List<String>,
     val labelIndex: Int,
-    val probabilities: FloatArray
+    val probabilities: FloatArray,
+    val multilabel: Boolean,
+    val thresholds: FloatArray?
 ) {
     val label: String get() = labels[labelIndex]
     val confidence: Float get() = probabilities[labelIndex]
 }
 
 /**
- * Classifieur embarqué : charge ``ecg_model.tflite`` depuis les assets et
- * prédit une des 4 classes PhysioNet/CinC 2017 (N, A, O, ~).
+ * Classifieur embarqué : charge ``ecg_model.tflite`` depuis les assets.
  *
- * La longueur d'entrée et le besoin de normalisation sont lus dans
- * ``model_info.txt`` (écrit par export_tflite.py) ; à défaut on retombe sur
- * 9000 échantillons sans normalisation (modèle CNN_ECG.py).
+ * La configuration est lue dans ``model_info.txt`` (écrit par export_tflite.py) :
+ * ``num_leads``, ``samples_per_lead``, ``sampling_hz``, ``normalize``,
+ * ``multilabel``, ``labels``, ``labels_fr``, ``thresholds``.
+ *
+ * Deux dispositions d'entrée sont supportées (déduites de la forme du tenseur) :
+ *  - [1, T, C] avec C > 1 : entrelacement temps-major (ex. PTB-XL [1, 1000, 12]) ;
+ *  - [1, ...] plat : concaténation des dérivations (ex. [1, 9000, 1] mono-dérivation).
+ *
+ * Chaque dérivation est ramenée à ``samples_per_lead`` échantillons à
+ * ``sampling_hz`` : sous-échantillonnage linéaire si la trace est plus longue,
+ * répétition (tiling) si elle est plus courte (ex. cellules de 2,5 s d'une
+ * impression 3×4 ramenées à 10 s).
  */
 class EcgClassifier(context: Context) : Closeable {
 
+    val numLeads: Int
     private val interpreter: org.tensorflow.lite.Interpreter
     private val inputLength: Int
+    private val timeChannels: Boolean
+    private val samplesPerLead: Int
+    private val samplingHz: Double
     private val normalize: Boolean
+    private val multilabel: Boolean
+    private val thresholds: FloatArray?
     private val labels: List<String>
 
     init {
@@ -42,17 +58,23 @@ class EcgClassifier(context: Context) : Closeable {
                 }
             }
         } catch (e: Exception) {
-            // pas de model_info.txt : comportement par défaut CNN_ECG.py (N,A,O,~)
+            // pas de model_info.txt : comportement par défaut mono-dérivation N,A,O,~
         }
+        numLeads = info["num_leads"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        samplingHz = info["sampling_hz"]?.toDoubleOrNull() ?: 300.0
         normalize = info["normalize"] == "true"
+        multilabel = info["multilabel"] == "true"
+        thresholds = info["thresholds"]?.split(",")
+            ?.map { it.trim().toFloatOrNull() }?.filterNotNull()?.toFloatArray()
+        val codes = info["labels"]?.split(",")?.map { it.trim() } ?: listOf("N", "A", "O", "~")
         val names = mapOf(
             "N" to "Normal",
             "A" to "Fibrillation atriale",
             "O" to "Autre",
             "~" to "Bruité"
         )
-        val codes = info["labels"]?.split(",")?.map { it.trim() } ?: listOf("N", "A", "O", "~")
-        labels = codes.map { names[it] ?: it }
+        val fr = info["labels_fr"]?.split(",")?.map { it.trim() }
+        labels = if (fr != null && fr.size == codes.size) fr else codes.map { names[it] ?: it }
 
         val afd = context.assets.openFd(MODEL_ASSET)
         val inputStream = FileInputStream(afd.fileDescriptor)
@@ -64,11 +86,40 @@ class EcgClassifier(context: Context) : Closeable {
 
         val shape = interpreter.getInputTensor(0).shape()
         inputLength = shape.fold(1) { acc, d -> acc * d }
+        timeChannels = shape.size == 3 && shape[2] > 1
+        samplesPerLead = if (timeChannels) {
+            shape[1]
+        } else {
+            info["samples_per_lead"]?.toIntOrNull() ?: (inputLength / numLeads)
+        }
     }
 
     fun classify(ecg: DigitizedEcg): ClassificationResult {
-        val resampled = resample(ecg.samplesMv, inputLength)
-        val input = if (normalize) zScore(resampled) else resampled
+        val leads = ecg.leads
+        val fitted = ArrayList<FloatArray>(numLeads)
+        for (i in 0 until numLeads) {
+            val src = leads.getOrElse(i) { leads.first() }
+            fitted.add(fitLead(src, ecg.samplesPerSec, samplesPerLead))
+        }
+
+        val flat = FloatArray(inputLength)
+        if (timeChannels) {
+            val c = (inputLength / samplesPerLead).coerceAtLeast(1)
+            var k = 0
+            for (t in 0 until samplesPerLead) {
+                for (ch in 0 until c) {
+                    if (k < inputLength) flat[k++] = fitted[ch][t]
+                }
+            }
+        } else {
+            var k = 0
+            for (l in fitted) {
+                for (v in l) {
+                    if (k < inputLength) flat[k++] = v
+                }
+            }
+        }
+        val input = if (normalize) zScore(flat) else flat
 
         val byteBuffer = ByteBuffer.allocateDirect(4 * inputLength).order(ByteOrder.nativeOrder())
         for (v in input) byteBuffer.putFloat(v)
@@ -77,25 +128,32 @@ class EcgClassifier(context: Context) : Closeable {
         interpreter.run(byteBuffer, output)
         val probs = output[0]
         val idx = probs.indices.maxByOrNull { probs[it] } ?: 0
-        return ClassificationResult(labels, idx, probs)
+        return ClassificationResult(labels, idx, probs, multilabel, thresholds)
     }
 
-    /** Rééchantillonne le tracé sur [length] points (fenêtre de 30 s à 300 Hz). */
-    private fun resample(src: FloatArray, length: Int): FloatArray {
-        if (src.size == length) return src.copyOf()
-        val out = FloatArray(length)
-        val step = (src.size - 1).toDouble() / (length - 1)
-        for (i in 0 until length) {
+    /**
+     * Ramène une dérivation à [target] échantillons à [samplingHz] :
+     * interpolation linéaire si la source est plus longue, répétition si plus courte.
+     */
+    private fun fitLead(src: FloatArray, samplesPerSec: Double, target: Int): FloatArray {
+        if (src.isEmpty()) return FloatArray(target)
+        val out = FloatArray(target)
+        val step = samplesPerSec / samplingHz
+        for (i in 0 until target) {
             val pos = i * step
-            val i0 = pos.toInt().coerceIn(0, src.size - 1)
-            val i1 = (i0 + 1).coerceIn(0, src.size - 1)
-            val t = pos - i0
-            out[i] = (src[i0] * (1.0f - t.toFloat()) + src[i1] * t.toFloat())
+            if (pos < src.size) {
+                val i0 = pos.toInt().coerceIn(0, src.size - 1)
+                val i1 = (i0 + 1).coerceIn(0, src.size - 1)
+                val t = (pos - i0).toFloat()
+                out[i] = src[i0] * (1f - t) + src[i1] * t
+            } else {
+                out[i] = src[(pos % src.size).toInt()]
+            }
         }
         return out
     }
 
-    /** Normalisation z-score par segment, identique à Conv1D_ECG.py. */
+    /** Normalisation z-score globale, identique à Conv1D_ECG.py. */
     private fun zScore(src: FloatArray): FloatArray {
         val mean = src.average()
         var variance = 0.0
