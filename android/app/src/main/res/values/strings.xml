@@ -11,6 +11,22 @@
     <string name="error_analysis">Erreur d’analyse : %1$s</string>
     <string name="result_label">Résultat : %1$s (%2$.0f %%)</string>
     <string name="multilabel_header">Détections (multi-label) :</string>
+    <string name="measures_header">Mesures (estimations, dérivation %1$s — %2$d battements) :</string>
+    <string name="heart_rate">FC : %1$.0f bpm</string>
+    <string name="rhythm">Rythme : %1$s</string>
+    <string name="rhythm_sinus">sinusal (estimé)</string>
+    <string name="rhythm_fa">fibrillation atriale probable (estimé)</string>
+    <string name="rhythm_irregular">irrégulier (estimé)</string>
+    <string name="intervals">PR : %1$s ms · QRS : %2$.0f ms · QT : %3$s ms · QTc : %4$s ms</string>
+    <string name="intervals_ref">(réf. PR 120–200, QRS &lt; 120, QTc &lt; 450 ms)</string>
+    <string name="axis">Axe cardiaque : %1$s</string>
+    <string name="axis_value">%1$.0f° (%2$s)</string>
+    <string name="axis_normal">normal</string>
+    <string name="axis_left">déviation gauche</string>
+    <string name="axis_right">déviation droite</string>
+    <string name="axis_extreme">axe extrême</string>
+    <string name="not_available">—</string>
+    <string name="measures_note">Estimations calculées sur la photo — à confirmer par un professionnel de santé.</string>
     <string name="info_format">Durée : %1$.1f s — %2$d échantillons — %3$s</string>
     <string name="disclaimer">Démo de recherche — ne remplace pas un avis médical. Consultez un médecin pour tout diagnostic.</string>
 </resources>

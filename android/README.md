@@ -43,6 +43,14 @@ atriale**, **Autre**, **Bruité**.
    longueur/fréquence d'entrée du modèle (9000 points @ 300 Hz pour le modèle
    1 dérivation, 1000 points × 12 @ 100 Hz pour PTB-XL ; z-score global si
    `normalize=true`), puis passée au modèle TFLite embarqué.
+4. **Mesures ECG** (`EcgMeasure`) : à partir du signal numérisé (dérivation II
+   si 12 dérivations), l'app estime la **fréquence cardiaque**, le **rythme**
+   (sinusal / FA probable / irrégulier, d'après la régularité des RR et la
+   présence d'ondes P), les intervalles **PR**, **QRS**, **QT** et **QTc
+   (Bazett), et l'**axe cardiaque** (atan2 des aires QRS de aVF et I, en
+   12 dérivations). Ce sont des **estimations heuristiques calculées sur une
+   photo**, affichées avec les valeurs de référence usuelles — jamais un
+   diagnostic.
 
 ## Prérequis
 

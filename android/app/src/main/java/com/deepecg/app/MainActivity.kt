@@ -25,6 +25,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var imageView: ImageView
     private lateinit var resultText: TextView
     private lateinit var infoText: TextView
+    private lateinit var measureText: TextView
     private lateinit var progressBar: ProgressBar
     private lateinit var captureButton: Button
     private lateinit var galleryButton: Button
@@ -54,6 +55,7 @@ class MainActivity : AppCompatActivity() {
         imageView = findViewById(R.id.imageView)
         resultText = findViewById(R.id.resultText)
         infoText = findViewById(R.id.infoText)
+        measureText = findViewById(R.id.measureText)
         progressBar = findViewById(R.id.progressBar)
         captureButton = findViewById(R.id.captureButton)
         galleryButton = findViewById(R.id.galleryButton)
@@ -124,6 +126,7 @@ class MainActivity : AppCompatActivity() {
                 val multiLead = clf.numLeads > 1
                 val ecg = if (multiLead) EcgDigitizer.digitize12(bitmap) else EcgDigitizer.digitize(bitmap)
                 val result = clf.classify(ecg)
+                val meas = EcgMeasure.measure(ecg.leads, ecg.samplesPerSec)
                 val leadSamples = ecg.leads.firstOrNull()?.size ?: 0
                 val durationSec = if (ecg.samplesPerSec > 0) leadSamples / ecg.samplesPerSec else 0.0
                 runOnUiThread {
@@ -134,6 +137,11 @@ class MainActivity : AppCompatActivity() {
                         ecg.leads.sumOf { it.size },
                         ecg.note
                     )
+                    measureText.text = if (meas != null) {
+                        buildMeasureText(meas, if (multiLead) "II" else "I")
+                    } else {
+                        ""
+                    }
                     resultText.text = buildResultText(result)
                 }
             } catch (e: Exception) {
@@ -143,6 +151,41 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun buildMeasureText(m: EcgMeasurements, leadName: String): String {
+        val sb = StringBuilder()
+        sb.append(getString(R.string.measures_header, leadName, m.beats)).append("\n")
+        val rhythmFr = when (m.rhythm) {
+            "sinus" -> getString(R.string.rhythm_sinus)
+            "fa" -> getString(R.string.rhythm_fa)
+            else -> getString(R.string.rhythm_irregular)
+        }
+        sb.append(getString(R.string.heart_rate, m.heartRate))
+            .append(" — ")
+            .append(getString(R.string.rhythm, rhythmFr))
+            .append("\n")
+        sb.append(
+            getString(
+                R.string.intervals,
+                m.prMs?.let { "%.0f".format(it) } ?: getString(R.string.not_available),
+                m.qrsMs,
+                m.qtMs?.let { "%.0f".format(it) } ?: getString(R.string.not_available),
+                m.qtcMs?.let { "%.0f".format(it) } ?: getString(R.string.not_available)
+            )
+        ).append("  ").append(getString(R.string.intervals_ref)).append("\n")
+        if (m.axisDeg != null) {
+            val ax = m.axisDeg
+            val label = when {
+                ax in -30.0..90.0 -> getString(R.string.axis_normal)
+                ax in -90.0 until -30.0 -> getString(R.string.axis_left)
+                ax in 90.0..180.0 -> getString(R.string.axis_right)
+                else -> getString(R.string.axis_extreme)
+            }
+            sb.append(getString(R.string.axis, getString(R.string.axis_value, ax, label))).append("\n")
+        }
+        sb.append(getString(R.string.measures_note))
+        return sb.toString()
     }
 
     private fun buildResultText(result: ClassificationResult): String {
