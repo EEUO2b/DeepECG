@@ -28,6 +28,9 @@ Three sources are supported:
    normalization baked into the exported TFLite, multi-label output over the 5
    PTB-XL superclasses NORM, MI, STTC, CD, HYP (with decision thresholds).
    Dataset: PTB-XL (Wagner et al., Scientific Data 2020).
+   This mode ALSO exports the single-lead Andreotti ResNet as ``af_model.tflite``
+   (+ ``af_model_info.txt``): the app runs it on lead II to give a dedicated
+   atrial-fibrillation probability (the PTB-XL superclasses have no AF class).
 
 All modes write ``ecg_model.tflite`` and ``model_info.txt`` into
 ``android/app/src/main/assets/``. Requires TensorFlow 2.x and numpy.
@@ -132,7 +135,7 @@ def export_ptbxl(spec, output):
     return info
 
 
-def export_keras_model(model_path, output, labels, normalize, sampling_hz, source=None, license=None):
+def export_keras_model(model_path, output, labels, normalize, sampling_hz, source=None, license=None, extra=None, info_name='model_info.txt'):
     import tensorflow as tf
 
     # compile=False: legacy Keras 2.x files carry an old optimizer config that
@@ -164,7 +167,9 @@ def export_keras_model(model_path, output, labels, normalize, sampling_hz, sourc
     if source:
         info['source'] = source
         info['license'] = license
-    write_info(output, info)
+    if extra:
+        info.update(extra)
+    write_info(output, info, info_name)
     print('input_length=%d num_leads=%d normalize=%s labels=%s' % (length, num_leads, normalize, labels))
     return info
 
@@ -178,8 +183,8 @@ def write_output(output, tflite_model):
     print('Wrote %s (%d bytes)' % (output, len(tflite_model)))
 
 
-def write_info(output, info):
-    info_path = os.path.join(os.path.dirname(output) or '.', 'model_info.txt')
+def write_info(output, info, info_name='model_info.txt'):
+    info_path = os.path.join(os.path.dirname(output) or '.', info_name)
     with open(info_path, 'w') as f:
         for k, v in info.items():
             f.write('%s=%s\n' % (k, v))
@@ -203,6 +208,15 @@ def main():
         spec = PRETRAINED[args.pretrained]
         if spec['kind'] == 'ptbxl':
             export_ptbxl(spec, args.output)
+            # secondary single-lead AF model, run by the app on lead II
+            af_spec = PRETRAINED['andreotti']
+            af_path = download(af_spec['files']['model'][0],
+                               os.path.join(PRETRAINED_DIR, af_spec['files']['model'][1]))
+            af_output = os.path.join(os.path.dirname(args.output) or '.', 'af_model.tflite')
+            export_keras_model(af_path, af_output, af_spec['labels'], af_spec['normalize'],
+                               af_spec['sampling_hz'], af_spec['source'], af_spec['license'],
+                               extra={'pad_short': 'true'}, info_name='af_model_info.txt')
+            print('Also exported AF model -> %s' % af_output)
         else:
             path = download(spec['files']['model'][0],
                             os.path.join(PRETRAINED_DIR, spec['files']['model'][1]))

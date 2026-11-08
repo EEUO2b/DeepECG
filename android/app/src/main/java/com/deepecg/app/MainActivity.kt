@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
 
     private var photoFile: File? = null
     private var classifier: EcgClassifier? = null
+    private var afClassifier: EcgClassifier? = null
     private val executor = Executors.newSingleThreadExecutor()
 
     private val takePicture =
@@ -69,11 +70,18 @@ class MainActivity : AppCompatActivity() {
             resultText.text = getString(R.string.model_missing)
             null
         }
+        // modèle FA dédié (optionnel) : lancé sur la dérivation II en 12 dérivations
+        afClassifier = try {
+            EcgClassifier(applicationContext, EcgClassifier.AF_MODEL_ASSET, EcgClassifier.AF_INFO_ASSET)
+        } catch (e: Exception) {
+            null
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         classifier?.close()
+        afClassifier?.close()
         executor.shutdown()
     }
 
@@ -127,6 +135,16 @@ class MainActivity : AppCompatActivity() {
                 val ecg = if (multiLead) EcgDigitizer.digitize12(bitmap) else EcgDigitizer.digitize(bitmap)
                 val result = clf.classify(ecg)
                 val meas = EcgMeasure.measure(ecg.leads, ecg.samplesPerSec)
+                // proba FA du modèle dédié sur la dérivation II (si modèle secondaire présent)
+                val afProb = afClassifier?.let { af ->
+                    if (ecg.leads.size >= 2) {
+                        val r = af.classify(DigitizedEcg(listOf(ecg.leads[1]), ecg.samplesPerSec, ""))
+                        val idx = af.codes.indexOf("A")
+                        if (idx >= 0) r.probabilities[idx] else null
+                    } else {
+                        null
+                    }
+                }
                 val leadSamples = ecg.leads.firstOrNull()?.size ?: 0
                 val durationSec = if (ecg.samplesPerSec > 0) leadSamples / ecg.samplesPerSec else 0.0
                 runOnUiThread {
@@ -138,7 +156,7 @@ class MainActivity : AppCompatActivity() {
                         ecg.note
                     )
                     measureText.text = if (meas != null) {
-                        buildMeasureText(meas, if (multiLead) "II" else "I")
+                        buildMeasureText(meas, if (multiLead) "II" else "I", afProb)
                     } else {
                         ""
                     }
@@ -153,7 +171,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildMeasureText(m: EcgMeasurements, leadName: String): String {
+    private fun buildMeasureText(m: EcgMeasurements, leadName: String, afProb: Float?): String {
         val sb = StringBuilder()
         sb.append(getString(R.string.measures_header, leadName, m.beats)).append("\n")
         val rhythmFr = when (m.rhythm) {
@@ -164,7 +182,12 @@ class MainActivity : AppCompatActivity() {
         sb.append(getString(R.string.heart_rate, m.heartRate))
             .append(" — ")
             .append(getString(R.string.rhythm, rhythmFr))
-            .append("\n")
+            .append(" (")
+            .append(getString(R.string.rr_cv, m.rrCv * 100.0))
+            .append(")\n")
+        if (afProb != null) {
+            sb.append(getString(R.string.af_model, afProb * 100f)).append("\n")
+        }
         sb.append(
             getString(
                 R.string.intervals,

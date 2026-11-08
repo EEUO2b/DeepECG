@@ -35,15 +35,21 @@ data class ClassificationResult(
  * répétition (tiling) si elle est plus courte (ex. cellules de 2,5 s d'une
  * impression 3×4 ramenées à 10 s).
  */
-class EcgClassifier(context: Context) : Closeable {
+class EcgClassifier(
+    context: Context,
+    modelAsset: String = MODEL_ASSET,
+    infoAsset: String = INFO_ASSET
+) : Closeable {
 
     val numLeads: Int
+    val codes: List<String>
     private val interpreter: org.tensorflow.lite.Interpreter
     private val inputLength: Int
     private val timeChannels: Boolean
     private val samplesPerLead: Int
     private val samplingHz: Double
     private val normalize: Boolean
+    private val padShort: Boolean
     private val multilabel: Boolean
     private val thresholds: FloatArray?
     private val labels: List<String>
@@ -51,7 +57,7 @@ class EcgClassifier(context: Context) : Closeable {
     init {
         val info = mutableMapOf<String, String>()
         try {
-            context.assets.open(INFO_ASSET).bufferedReader().useLines { lines ->
+            context.assets.open(infoAsset).bufferedReader().useLines { lines ->
                 lines.forEach { line ->
                     val parts = line.split('=', limit = 2)
                     if (parts.size == 2) info[parts[0].trim()] = parts[1].trim()
@@ -63,10 +69,11 @@ class EcgClassifier(context: Context) : Closeable {
         numLeads = info["num_leads"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         samplingHz = info["sampling_hz"]?.toDoubleOrNull() ?: 300.0
         normalize = info["normalize"] == "true"
+        padShort = info["pad_short"] == "true"
         multilabel = info["multilabel"] == "true"
         thresholds = info["thresholds"]?.split(",")
             ?.map { it.trim().toFloatOrNull() }?.filterNotNull()?.toFloatArray()
-        val codes = info["labels"]?.split(",")?.map { it.trim() } ?: listOf("N", "A", "O", "~")
+        codes = info["labels"]?.split(",")?.map { it.trim() } ?: listOf("N", "A", "O", "~")
         val names = mapOf(
             "N" to "Normal",
             "A" to "Fibrillation atriale",
@@ -76,7 +83,7 @@ class EcgClassifier(context: Context) : Closeable {
         val fr = info["labels_fr"]?.split(",")?.map { it.trim() }
         labels = if (fr != null && fr.size == codes.size) fr else codes.map { names[it] ?: it }
 
-        val afd = context.assets.openFd(MODEL_ASSET)
+        val afd = context.assets.openFd(modelAsset)
         val inputStream = FileInputStream(afd.fileDescriptor)
         val buffer = inputStream.channel.map(
             FileChannel.MapMode.READ_ONLY, afd.startOffset, afd.declaredLength
@@ -99,7 +106,7 @@ class EcgClassifier(context: Context) : Closeable {
         val fitted = ArrayList<FloatArray>(numLeads)
         for (i in 0 until numLeads) {
             val src = leads.getOrElse(i) { leads.first() }
-            fitted.add(fitLead(src, ecg.samplesPerSec, samplesPerLead))
+            fitted.add(fitLead(src, ecg.samplesPerSec, samplesPerLead, padShort))
         }
 
         val flat = FloatArray(inputLength)
@@ -135,9 +142,14 @@ class EcgClassifier(context: Context) : Closeable {
      * Ramène une dérivation à [target] échantillons à [samplingHz] :
      * interpolation linéaire si la source est plus longue, répétition si plus courte.
      */
-    private fun fitLead(src: FloatArray, samplesPerSec: Double, target: Int): FloatArray {
+    private fun fitLead(src: FloatArray, samplesPerSec: Double, target: Int, padShort: Boolean): FloatArray {
         if (src.isEmpty()) return FloatArray(target)
         val out = FloatArray(target)
+        if (padShort && src.size < target) {
+            val padded = FloatArray(target)
+            src.copyInto(padded)
+            return padded
+        }
         val step = samplesPerSec / samplingHz
         for (i in 0 until target) {
             val pos = i * step
@@ -169,5 +181,7 @@ class EcgClassifier(context: Context) : Closeable {
     companion object {
         const val MODEL_ASSET = "ecg_model.tflite"
         const val INFO_ASSET = "model_info.txt"
+        const val AF_MODEL_ASSET = "af_model.tflite"
+        const val AF_INFO_ASSET = "af_model_info.txt"
     }
 }

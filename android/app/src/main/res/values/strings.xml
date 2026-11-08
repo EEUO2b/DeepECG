@@ -17,6 +17,8 @@
     <string name="rhythm_sinus">sinusal (estimé)</string>
     <string name="rhythm_fa">fibrillation atriale probable (estimé)</string>
     <string name="rhythm_irregular">irrégulier (estimé)</string>
+    <string name="rr_cv">variabilité RR %1$.0f %%</string>
+    <string name="af_model">FA (modèle dédié 1 dérivation, dérivation II) : %1$.0f %%</string>
     <string name="intervals">PR : %1$s ms · QRS : %2$.0f ms · QT : %3$s ms · QTc : %4$s ms</string>
     <string name="intervals_ref">(réf. PR 120–200, QRS &lt; 120, QTc &lt; 450 ms)</string>
     <string name="axis">Axe cardiaque : %1$s</string>

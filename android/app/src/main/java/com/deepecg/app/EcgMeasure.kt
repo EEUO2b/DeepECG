@@ -12,6 +12,7 @@ import kotlin.math.sqrt
 data class EcgMeasurements(
     val heartRate: Double,
     val rhythm: String, // "sinus" | "fa" | "irregulier"
+    val rrCv: Double,   // coefficient de variation des intervalles RR
     val prMs: Double?,
     val qrsMs: Double,
     val qtMs: Double?,
@@ -102,13 +103,15 @@ object EcgMeasure {
         val qtMed = if (qts.isEmpty()) null else median(qts.toDoubleArray())
         val qtc = qtMed?.div(sqrt(rrMed))
         val prMed = if (prs.isNotEmpty() && prs.size >= 0.5 * n) median(prs.toDoubleArray()) else null
+        // Rythme : la FA = RR "irrégulièrement irréguliers" (cv élevé). La
+        // présence d'ondes P n'est pas fiable (les ondes f mimpent des P).
         val rhythm = when {
-            cv < 0.10 && pFound >= 0.8 * n -> "sinus"
-            cv > 0.12 && pFound < 0.5 * n -> "fa"
+            cv >= 0.10 -> "fa"
+            pFound >= 0.5 * n -> "sinus"
             else -> "irregulier"
         }
         val axis = if (leads.size >= 6) computeAxis(leads[0], leads[5], fs) else null
-        return EcgMeasurements(heartRate, rhythm, prMed, median(qrss.toDoubleArray()), qtMed, qtc, axis, r.size)
+        return EcgMeasurements(heartRate, rhythm, cv, prMed, median(qrss.toDoubleArray()), qtMed, qtc, axis, r.size)
     }
 
     /** Axe frontal = atan2(aire nette QRS en aVF, aire nette QRS en I), en degrés. */
